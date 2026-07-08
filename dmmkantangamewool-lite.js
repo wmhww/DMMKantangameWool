@@ -319,12 +319,124 @@
 
     // main func
 
+    let autoFinishWinAfterDelay = function(gameid, seconds){
+        const delaySec = (typeof seconds === 'number') ? seconds : (8 + Math.random() * 2);
+        const ms = Math.round(delaySec * 1000);
+        console.log('autoFinish: 延迟设置为 ' + delaySec.toFixed(2) + ' 秒');
+        setTimeout(function(){
+            try {
+                console.log('autoFinish: 尝试在页面上触发结算（胜利）');
+                const eg = unsafeWindow.easygame || window.easygame;
+                const tryFns = ['finish','finishGame','finish_game','end','complete','gameFinish','submitResult','sendResult','gameOver'];
+                let called = false;
+                if (eg) {
+                    for (let fn of tryFns) {
+                        if (typeof eg[fn] === 'function') {
+                            try { eg[fn](); called = true; console.log('autoFinish: 调用了 easygame.' + fn); break; } catch (e) { console.error(e); }
+                        }
+                    }
+                }
+                if (!called) {
+                    const keywords = ['finish','submit','send','result','end','complete','結果','リザルト','終了','送信','受け取'];
+                    const buttons = document.querySelectorAll('button,a,input[type="button"],input[type="submit"]');
+                    for (let btn of buttons) {
+                        if (!btn || !btn.textContent) continue;
+                        const text = btn.textContent.trim().toLowerCase();
+                        for (let kw of keywords) {
+                            if (text.indexOf(kw.toLowerCase()) !== -1) {
+                                try { btn.click(); called = true; console.log('autoFinish: 点击按钮触发结算 ->', text); } catch (e) { console.error(e); }
+                                break;
+                            }
+                        }
+                        if (called) break;
+                    }
+                }
+                if (!called) {
+                    try {
+                        if (typeof $ !== 'undefined' && typeof $.ajax === 'function') {
+                            $.ajax({
+                                url: '/easygame/finish.json',
+                                method: 'POST',
+                                data: { game_id: gameid },
+                            });
+                            console.log('autoFinish: 发送回退 finish 请求（不保证包含必要字段）');
+                        }
+                    } catch (e) { console.error(e); }
+                }
+            } catch (e) {
+                console.error('autoFinish error', e);
+            }
+        }, ms);
+    }
+
+    let autoClaimRewardAndStartNext = function(gameid, secondsAfterFinish){
+        const ms = (secondsAfterFinish || 2) * 1000;
+        setTimeout(function(){
+            try {
+                console.log('autoClaim: 尝试领取奖励并开始下一次小游戏');
+                const eg = unsafeWindow.easygame || window.easygame;
+                // 先尝试通过 easygame.getReward
+                if (eg && typeof eg.getReward === 'function') {
+                    try { eg.getReward(); console.log('autoClaim: 调用了 easygame.getReward()'); } catch(e){ console.error(e); }
+                }
+
+                // 尝试点击可能的领取奖励或下一局按钮
+                const rewardKeywords = ['受け取る','受取','取得','领取','Get Reward','受領','報酬','受け取り','受取る','受け取','受け取る','受け取ります','受領する','次へ','次に進む','次へ進む','もう一度','Play Again','Play Next','Next','Start','開始','スタート','戻る','もう一回'];
+                const anchors = Array.from(document.querySelectorAll('button,a,input[type="button"],input[type="submit"]'));
+                let clicked = false;
+                for (let el of anchors) {
+                    const txt = (el.textContent || el.value || '').trim();
+                    if (!txt) continue;
+                    const lower = txt.toLowerCase();
+                    for (let kw of rewardKeywords) {
+                        if (lower.indexOf(kw.toLowerCase()) !== -1) {
+                            try { el.click(); clicked = true; console.log('autoClaim: 点击 ->', txt); } catch (e) { console.error(e); }
+                            break;
+                        }
+                    }
+                    if (clicked) break;
+                }
+
+                // 如果没有找到按钮，尝试寻找下一局链接（/easygame/game/ID）
+                if (!clicked) {
+                    const links = Array.from(document.querySelectorAll('a')); 
+                    for (let a of links) {
+                        if (!a.href) continue;
+                        if (/\/easygame\/game\/[0-9]+/.test(a.getAttribute('href'))) {
+                            try { a.click(); clicked = true; console.log('autoClaim: 点击下一局链接 ->', a.href); } catch(e){ console.error(e); }
+                            break;
+                        }
+                    }
+                }
+
+                // 作为最后手段，尝试使用 AJAX 请求启动下一局（仅作尝试，不保证服务器接受）
+                if (!clicked) {
+                    try {
+                        if (typeof $ !== 'undefined' && typeof $.ajax === 'function') {
+                            $.ajax({
+                                url: '/easygame/game/' + gameid,
+                                method: 'GET'
+                            });
+                            console.log('autoClaim: 发送 GET 请求尝试打开下一局（备选）');
+                        }
+                    } catch (e) { console.error(e); }
+                }
+            } catch (e) {
+                console.error('autoClaim error', e);
+            }
+        }, ms);
+    }
+
     let main = async function(){
         console.log("game page main func");
         let currentGameid = getGameid(unsafeWindow.location.href);
         hookAjaxFinishScore(currentGameid, "win");
         hookEasygameGetReward();
         noAdsEasygameHealing();
+        // 在打开小游戏后 10 秒尝试自动触发结算为胜利
+        autoFinishWinAfterDelay(currentGameid, 10);
+        // 在结算后尝试领取奖励并开始下一局（稍延迟）
+        autoClaimRewardAndStartNext(currentGameid, 12);
         return;
     }
     
